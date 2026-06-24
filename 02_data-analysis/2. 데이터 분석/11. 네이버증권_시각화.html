@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>네이버 증권 데이터 시각화</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            padding: 30px;
+        }
+
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 2.5em;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 1.1em;
+        }
+
+        .info-panel {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+
+        .info-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+        }
+
+        .info-card h3 {
+            font-size: 0.9em;
+            opacity: 0.9;
+            margin-bottom: 10px;
+        }
+
+        .info-card .value {
+            font-size: 1.8em;
+            font-weight: bold;
+        }
+
+        .chart-container {
+            position: relative;
+            height: 500px;
+            margin-bottom: 30px;
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 10px;
+        }
+
+        .chart-container h2 {
+            margin-bottom: 20px;
+            color: #333;
+            font-size: 1.5em;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 50px;
+            color: #666;
+            font-size: 1.2em;
+        }
+
+        .error {
+            text-align: center;
+            padding: 50px;
+            color: #e74c3c;
+            font-size: 1.2em;
+            background: #ffe6e6;
+            border-radius: 10px;
+            margin: 20px 0;
+        }
+
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 30px;
+            background: white;
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+
+        .data-table thead {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .data-table th,
+        .data-table td {
+            padding: 12px;
+            text-align: center;
+        }
+
+        .data-table th {
+            font-weight: 600;
+        }
+
+        .data-table tbody tr:nth-child(even) {
+            background: #f8f9fa;
+        }
+
+        .data-table tbody tr:hover {
+            background: #e9ecef;
+            transition: background 0.2s;
+        }
+
+        .positive {
+            color: #e74c3c;
+            font-weight: bold;
+        }
+
+        .negative {
+            color: #3498db;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📈 네이버 증권 데이터 시각화</h1>
+        <p class="subtitle">SK하이닉스 (000660) 일봉 차트</p>
+        
+        <div id="loading" class="loading">데이터를 불러오는 중...</div>
+        <div id="error" class="error" style="display: none;"></div>
+        
+        <div id="content" style="display: none;">
+            <div class="info-panel" id="infoPanel"></div>
+            
+            <div class="chart-container">
+                <h2>📊 가격 추이 차트</h2>
+                <canvas id="priceChart"></canvas>
+            </div>
+            
+            <div class="chart-container">
+                <h2>📉 거래량 차트</h2>
+                <canvas id="volumeChart"></canvas>
+            </div>
+            
+            <table class="data-table" id="dataTable">
+                <thead>
+                    <tr>
+                        <th>날짜</th>
+                        <th>시가</th>
+                        <th>고가</th>
+                        <th>저가</th>
+                        <th>종가</th>
+                        <th>거래량</th>
+                        <th>등락률</th>
+                    </tr>
+                </thead>
+                <tbody id="tableBody"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        let priceChart = null;
+        let volumeChart = null;
+
+        // JSON 파일 로드
+        async function loadData() {
+            try {
+                const response = await fetch('네이버증권_데이터.json');
+                if (!response.ok) {
+                    throw new Error('JSON 파일을 찾을 수 없습니다.');
+                }
+                const data = await response.json();
+                processData(data);
+            } catch (error) {
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('error').style.display = 'block';
+                document.getElementById('error').textContent = '오류: ' + error.message;
+            }
+        }
+
+        // 데이터 처리 및 시각화
+        function processData(data) {
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('content').style.display = 'block';
+
+            // priceInfos 배열에서 데이터 가져오기
+            let candles = [];
+            
+            if (data.priceInfos && Array.isArray(data.priceInfos)) {
+                candles = data.priceInfos;
+            } else {
+                console.log('데이터 구조:', data);
+                document.getElementById('error').style.display = 'block';
+                document.getElementById('error').textContent = '지원하지 않는 데이터 형식입니다. priceInfos 배열을 찾을 수 없습니다.';
+                return;
+            }
+
+            if (candles.length === 0) {
+                document.getElementById('error').style.display = 'block';
+                document.getElementById('error').textContent = '데이터가 없습니다.';
+                return;
+            }
+
+            // 데이터 정렬 (날짜순 - localDate 기준)
+            candles.sort((a, b) => {
+                const dateA = a.localDate || '';
+                const dateB = b.localDate || '';
+                return dateA.localeCompare(dateB);
+            });
+
+            // 날짜 포맷팅 함수 (localDate: "20250711" 형식의 문자열)
+            function formatDate(localDate) {
+                if (!localDate || localDate.length !== 8) {
+                    return localDate;
+                }
+                const year = localDate.substring(0, 4);
+                const month = localDate.substring(4, 6);
+                const day = localDate.substring(6, 8);
+                return `${year}-${month}-${day}`;
+            }
+
+            // 일일 거래량 계산 (누적 거래량의 차이)
+            function calculateDailyVolumes(candles) {
+                const dailyVolumes = [];
+                for (let i = 0; i < candles.length; i++) {
+                    if (i === 0) {
+                        dailyVolumes.push(candles[i].accumulatedTradingVolume || 0);
+                    } else {
+                        const current = candles[i].accumulatedTradingVolume || 0;
+                        const previous = candles[i - 1].accumulatedTradingVolume || 0;
+                        dailyVolumes.push(Math.max(0, current - previous));
+                    }
+                }
+                return dailyVolumes;
+            }
+
+            // 데이터 추출
+            const labels = candles.map(candle => {
+                return formatDate(candle.localDate);
+            });
+
+            const openPrices = candles.map(c => c.openPrice || 0);
+            const highPrices = candles.map(c => c.highPrice || 0);
+            const lowPrices = candles.map(c => c.lowPrice || 0);
+            const closePrices = candles.map(c => c.closePrice || 0);
+            const volumes = calculateDailyVolumes(candles);
+
+            // 통계 정보 계산
+            const latest = candles[candles.length - 1];
+            const previous = candles[candles.length - 2] || latest;
+            const latestClose = closePrices[closePrices.length - 1];
+            const previousClose = closePrices[closePrices.length - 2] || latestClose;
+            const change = latestClose - previousClose;
+            const changePercent = previousClose !== 0 ? ((change / previousClose) * 100).toFixed(2) : 0;
+
+            const maxPrice = Math.max(...highPrices);
+            const minPrice = Math.min(...lowPrices);
+            const avgVolume = volumes.reduce((a, b) => a + b, 0) / volumes.length;
+
+            // 정보 패널 업데이트
+            updateInfoPanel(latestClose, change, changePercent, maxPrice, minPrice, avgVolume);
+
+            // 차트 생성
+            createPriceChart(labels, openPrices, highPrices, lowPrices, closePrices);
+            createVolumeChart(labels, volumes);
+
+            // 테이블 생성
+            createTable(candles, formatDate);
+        }
+
+        // 정보 패널 업데이트
+        function updateInfoPanel(close, change, changePercent, max, min, avgVol) {
+            const panel = document.getElementById('infoPanel');
+            panel.innerHTML = `
+                <div class="info-card">
+                    <h3>현재가</h3>
+                    <div class="value">${close.toLocaleString()}원</div>
+                </div>
+                <div class="info-card">
+                    <h3>전일 대비</h3>
+                    <div class="value ${change >= 0 ? 'positive' : 'negative'}">
+                        ${change >= 0 ? '+' : ''}${change.toLocaleString()}원
+                    </div>
+                </div>
+                <div class="info-card">
+                    <h3>등락률</h3>
+                    <div class="value ${changePercent >= 0 ? 'positive' : 'negative'}">
+                        ${changePercent >= 0 ? '+' : ''}${changePercent}%
+                    </div>
+                </div>
+                <div class="info-card">
+                    <h3>최고가</h3>
+                    <div class="value">${max.toLocaleString()}원</div>
+                </div>
+                <div class="info-card">
+                    <h3>최저가</h3>
+                    <div class="value">${min.toLocaleString()}원</div>
+                </div>
+                <div class="info-card">
+                    <h3>평균 거래량</h3>
+                    <div class="value">${Math.round(avgVol).toLocaleString()}</div>
+                </div>
+            `;
+        }
+
+        // 가격 차트 생성
+        function createPriceChart(labels, open, high, low, close) {
+            const ctx = document.getElementById('priceChart').getContext('2d');
+            
+            if (priceChart) {
+                priceChart.destroy();
+            }
+
+            priceChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: '시가',
+                            data: open,
+                            borderColor: 'rgb(54, 162, 235)',
+                            backgroundColor: 'rgba(54, 162, 235, 0.1)',
+                            tension: 0.1,
+                            pointRadius: 0
+                        },
+                        {
+                            label: '고가',
+                            data: high,
+                            borderColor: 'rgb(255, 99, 132)',
+                            backgroundColor: 'rgba(255, 99, 132, 0.1)',
+                            tension: 0.1,
+                            pointRadius: 0
+                        },
+                        {
+                            label: '저가',
+                            data: low,
+                            borderColor: 'rgb(75, 192, 192)',
+                            backgroundColor: 'rgba(75, 192, 192, 0.1)',
+                            tension: 0.1,
+                            pointRadius: 0
+                        },
+                        {
+                            label: '종가',
+                            data: close,
+                            borderColor: 'rgb(153, 102, 255)',
+                            backgroundColor: 'rgba(153, 102, 255, 0.1)',
+                            tension: 0.1,
+                            pointRadius: 0,
+                            borderWidth: 2
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'top',
+                        },
+                        tooltip: {
+                            mode: 'index',
+                            intersect: false,
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: false,
+                            ticks: {
+                                callback: function(value) {
+                                    return value.toLocaleString() + '원';
+                                }
+                            }
+                        },
+                        x: {
+                            ticks: {
+                                maxRotation: 45,
+                                minRotation: 45
+                            }
+                        }
+                    },
+                    interaction: {
+                        mode: 'nearest',
+                        axis: 'x',
+                        intersect: false
+                    }
+                }
+            });
+        }
+
+        // 거래량 차트 생성
+        function createVolumeChart(labels, volumes) {
+            const ctx = document.getElementById('volumeChart').getContext('2d');
+            
+            if (volumeChart) {
+                volumeChart.destroy();
+            }
+
+            volumeChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: '거래량',
+                        data: volumes,
+                        backgroundColor: 'rgba(54, 162, 235, 0.6)',
+                        borderColor: 'rgba(54, 162, 235, 1)',
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            display: false
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return '거래량: ' + context.parsed.y.toLocaleString();
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                callback: function(value) {
+                                    return value.toLocaleString();
+                                }
+                            }
+                        },
+                        x: {
+                            ticks: {
+                                maxRotation: 45,
+                                minRotation: 45
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // 테이블 생성
+        function createTable(candles, formatDate) {
+            const tbody = document.getElementById('tableBody');
+            tbody.innerHTML = '';
+
+            candles.forEach((candle, index) => {
+                const localDate = candle.localDate || '';
+                const open = candle.openPrice || 0;
+                const high = candle.highPrice || 0;
+                const low = candle.lowPrice || 0;
+                const close = candle.closePrice || 0;
+                
+                // 일일 거래량 계산
+                let volume = 0;
+                if (index === 0) {
+                    volume = candle.accumulatedTradingVolume || 0;
+                } else {
+                    const current = candle.accumulatedTradingVolume || 0;
+                    const previous = candles[index - 1].accumulatedTradingVolume || 0;
+                    volume = Math.max(0, current - previous);
+                }
+                
+                const previousClose = index > 0 ? 
+                    (candles[index - 1].closePrice || close) : close;
+                const change = close - previousClose;
+                const changePercent = previousClose !== 0 ? ((change / previousClose) * 100).toFixed(2) : 0;
+
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>${formatDate(localDate)}</td>
+                    <td>${open.toLocaleString()}</td>
+                    <td>${high.toLocaleString()}</td>
+                    <td>${low.toLocaleString()}</td>
+                    <td>${close.toLocaleString()}</td>
+                    <td>${volume.toLocaleString()}</td>
+                    <td class="${change >= 0 ? 'positive' : 'negative'}">
+                        ${change >= 0 ? '+' : ''}${changePercent}%
+                    </td>
+                `;
+                tbody.appendChild(row);
+            });
+        }
+
+        // 페이지 로드 시 데이터 로드
+        window.addEventListener('DOMContentLoaded', loadData);
+    </script>
+</body>
+</html>
